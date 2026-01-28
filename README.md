@@ -1,11 +1,11 @@
-# @capacitor/local-notifications
+# capacitor-local-notifications
 
 The Local Notifications API provides a way to schedule device notifications locally (i.e. without a server sending push notifications).
 
 ## Install
 
 ```bash
-npm install @capacitor/local-notifications@latest-7
+npm install capacitor-local-notifications@latest-7
 npx cap sync
 ```
 
@@ -63,7 +63,7 @@ In `capacitor.config.json`:
 In `capacitor.config.ts`:
 
 ```ts
-/// <reference types="@capacitor/local-notifications" />
+/// <reference types="@numeriz/capacitor-local-notifications" />
 
 import { CapacitorConfig } from '@capacitor/cli';
 
@@ -851,28 +851,33 @@ Result from starting a Live Activity.
 
 Options for starting a Live Activity (iOS) or Timer Notification (Android).
 
-| Prop                   | Type                                                                                            | Description                                                                                        |
-| ---------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| **`id`**               | <code>string</code>                                                                             | Unique identifier for the activity.                                                                |
-| **`title`**            | <code>string</code>                                                                             | Display title.                                                                                     |
-| **`message`**          | <code>string</code>                                                                             | Display message/body.                                                                              |
-| **`timer`**            | <code>{ mode: 'countdown' \| 'elapsed'; targetTimestamp: number; alertOnEnd?: boolean; }</code> | Timer configuration (optional). If provided, the system handles the timer display automatically.   |
-| **`contentState`**     | <code><a href="#record">Record</a>&lt;string, string&gt;</code>                                 | Dynamic values (updated via updateLiveActivity). All values must be strings for iOS compatibility. |
-| **`staticAttributes`** | <code><a href="#record">Record</a>&lt;string, string&gt;</code>                                 | Static values (set once at start, cannot be updated).                                              |
-| **`channelId`**        | <code>string</code>                                                                             | <a href="#channel">Channel</a> ID for Android notifications.                                       |
-| **`smallIcon`**        | <code>string</code>                                                                             | Small icon for Android notifications.                                                              |
+| Prop                   | Type                                                                                                                                                                      | Description                                                                                                                    | Default           | Since |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------- | ----- |
+| **`id`**               | <code>string</code>                                                                                                                                                       | Unique identifier for the activity.                                                                                            |                   |       |
+| **`title`**            | <code>string</code>                                                                                                                                                       | Display title.                                                                                                                 |                   |       |
+| **`message`**          | <code>string</code>                                                                                                                                                       | Display message/body.                                                                                                          |                   |       |
+| **`timer`**            | <code>{ mode: 'countdown' \| 'elapsed'; targetTimestamp: number; alertOnEnd?: boolean; alertTimestamp?: number; startTimestamp?: number; maxDurationMs?: number; }</code> | Timer configuration (optional). If provided, the system handles the timer display automatically.                               |                   |       |
+| **`contentState`**     | <code><a href="#record">Record</a>&lt;string, string&gt;</code>                                                                                                           | Dynamic values (updated via updateLiveActivity). All values must be strings for iOS compatibility.                             |                   |       |
+| **`staticAttributes`** | <code><a href="#record">Record</a>&lt;string, string&gt;</code>                                                                                                           | Static values (set once at start, cannot be updated).                                                                          |                   |       |
+| **`channelId`**        | <code>string</code>                                                                                                                                                       | <a href="#channel">Channel</a> ID for Android notifications.                                                                   |                   |       |
+| **`smallIcon`**        | <code>string</code>                                                                                                                                                       | Small icon for Android notifications.                                                                                          |                   |       |
+| **`actionTypeId`**     | <code>string</code>                                                                                                                                                       | <a href="#action">Action</a> type ID for notification actions. Links to registered action types (buttons on the notification). |                   | 7.2.0 |
+| **`progress`**         | <code>{ max?: number; current: number; indeterminate?: boolean; }</code>                                                                                                  | Progress bar configuration (Android only). Shows a progress indicator in the notification.                                     |                   | 7.2.0 |
+| **`vibrate`**          | <code>boolean</code>                                                                                                                                                      | Whether to vibrate when the notification is shown (Android only). Useful for initial notification or alert state.              | <code>true</code> | 7.2.0 |
 
 
 #### UpdateLiveActivityOptions
 
 Options for updating a Live Activity.
 
-| Prop               | Type                                                            | Description                       |
-| ------------------ | --------------------------------------------------------------- | --------------------------------- |
-| **`id`**           | <code>string</code>                                             | The activity identifier.          |
-| **`title`**        | <code>string</code>                                             | Updated title (optional).         |
-| **`message`**      | <code>string</code>                                             | Updated message (optional).       |
-| **`contentState`** | <code><a href="#record">Record</a>&lt;string, string&gt;</code> | Updated content state (optional). |
+| Prop               | Type                                                                     | Description                                                                               | Default            | Since |
+| ------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- | ------------------ | ----- |
+| **`id`**           | <code>string</code>                                                      | The activity identifier.                                                                  |                    |       |
+| **`title`**        | <code>string</code>                                                      | Updated title (optional).                                                                 |                    |       |
+| **`message`**      | <code>string</code>                                                      | Updated message (optional).                                                               |                    |       |
+| **`contentState`** | <code><a href="#record">Record</a>&lt;string, string&gt;</code>          | Updated content state (optional).                                                         |                    |       |
+| **`progress`**     | <code>{ max?: number; current: number; indeterminate?: boolean; }</code> | Updated progress bar configuration (Android only).                                        |                    | 7.2.0 |
+| **`vibrate`**      | <code>boolean</code>                                                     | Whether to vibrate when updating (Android only). Useful for transitioning to alert state. | <code>false</code> | 7.2.0 |
 
 
 #### EndLiveActivityOptions

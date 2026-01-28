@@ -1,5 +1,5 @@
 {
-  "name": "@numeriz/capacitor-local-notifications",
+  "name": "capacitor-local-notifications",
   "version": "7.0.4-fork.1",
   "description": "The Local Notifications API provides a way to schedule device notifications locally (i.e. without a server sending push notifications).",
   "main": "dist/plugin.cjs.js",
@@ -73,7 +73,8 @@
   },
   "capacitor": {
     "ios": {
-      "src": "ios"
+      "src": "ios",
+      "name": "CapacitorLocalNotifications"
     },
     "android": {
       "src": "android"

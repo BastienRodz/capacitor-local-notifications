@@ -31,7 +31,7 @@ public class TimerProgressService extends Service {
 
     private static final String TAG = "TimerProgressService";
     private static final String PREFS_NAME = "timer_progress_prefs";
-    private static final long UPDATE_INTERVAL_MS = 2000; // Update every 2 seconds
+    private static final long UPDATE_INTERVAL_MS = 5000; // Check every 5 seconds (no visual update needed)
 
     // Intent action keys
     public static final String ACTION_START_TIMER = "com.capacitorjs.localnotifications.START_TIMER";
@@ -133,43 +133,60 @@ public class TimerProgressService extends Service {
     }
 
     private static final String DEFAULT_CHANNEL_ID = "live_activity";
-    
+
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             String channelId = currentChannelId != null ? currentChannelId : DEFAULT_CHANNEL_ID;
-            NotificationChannel channel = notificationManager.getNotificationChannel(channelId);
-            if (channel == null) {
-                channel = new NotificationChannel(
+            NotificationChannel existingChannel = notificationManager.getNotificationChannel(channelId);
+
+            // Check if channel needs to be recreated due to wrong importance
+            // IMPORTANCE_HIGH (4) is required for vibration to work
+            if (existingChannel != null && existingChannel.getImportance() < NotificationManager.IMPORTANCE_HIGH) {
+                // Delete the old channel with wrong importance
+                notificationManager.deleteNotificationChannel(channelId);
+                existingChannel = null;
+                Logger.debug(Logger.tags("LN"), TAG + ": Deleted channel " + channelId + " to recreate with higher importance");
+            }
+
+            if (existingChannel == null) {
+                NotificationChannel channel = new NotificationChannel(
                     channelId,
-                    "Live Activities",
-                    NotificationManager.IMPORTANCE_HIGH
+                    "Activité en cours",
+                    NotificationManager.IMPORTANCE_HIGH // Required for vibration
                 );
-                channel.setDescription("Timer notifications");
+                channel.setDescription("Notifications pour le suivi en temps réel");
                 channel.enableVibration(true);
+                channel.setSound(null, null); // No sound, but vibration enabled
                 notificationManager.createNotificationChannel(channel);
+                Logger.debug(Logger.tags("LN"), TAG + ": Created channel " + channelId + " with IMPORTANCE_HIGH");
             }
         }
     }
 
+    // Cached builder to avoid recreating actions on each update
+    private NotificationCompat.Builder cachedBuilder = null;
+    
     private Notification createInitialNotification() {
         // Ensure the channel exists
         createNotificationChannel();
         
         String channelId = currentChannelId != null ? currentChannelId : DEFAULT_CHANNEL_ID;
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, channelId)
+        cachedBuilder = new NotificationCompat.Builder(this, channelId)
             .setContentTitle(currentTitle)
             .setContentText(currentMessage != null ? currentMessage : "")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOngoing(true)
             .setAutoCancel(false)
+            .setOnlyAlertOnce(true) // Vibrate only on first show, silent on updates
             .setUsesChronometer(true)
             .setWhen(startTimestamp)
             .setShowWhen(true)
-            .setProgress(100, 0, false)
-            // Vibrer au demarrage
+            // Vibrer au démarrage - pattern: pause, vibration, pause, vibration
             .setVibrate(new long[]{0, 300, 200, 300})
-            .setDefaults(NotificationCompat.DEFAULT_LIGHTS);
+            .setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS);
+        
+        NotificationCompat.Builder builder = cachedBuilder;
 
         // Use BigTextStyle
         NotificationCompat.BigTextStyle bigTextStyle = new NotificationCompat.BigTextStyle()
@@ -222,8 +239,8 @@ public class TimerProgressService extends Service {
             }
         };
 
-        // Start immediately
-        handler.post(updateRunnable);
+        // Delay first check by 3 seconds to allow initial vibration to complete
+        handler.postDelayed(updateRunnable, 3000);
     }
 
     private void stopTimer() {
@@ -231,6 +248,7 @@ public class TimerProgressService extends Service {
             handler.removeCallbacks(updateRunnable);
             updateRunnable = null;
         }
+        cachedBuilder = null; // Clear cached builder
         clearTimerConfig();
     }
 
@@ -269,35 +287,9 @@ public class TimerProgressService extends Service {
     }
 
     private void updateNotificationProgress(int progressPercent) {
-        String channelId = currentChannelId != null ? currentChannelId : DEFAULT_CHANNEL_ID;
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, channelId)
-            .setContentTitle(currentTitle)
-            .setContentText(currentMessage != null ? currentMessage : "")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setOnlyAlertOnce(true) // Don't vibrate on updates
-            .setUsesChronometer(true)
-            .setWhen(startTimestamp)
-            .setShowWhen(true)
-            .setProgress(100, progressPercent, false);
-
-        // Use BigTextStyle
-        NotificationCompat.BigTextStyle bigTextStyle = new NotificationCompat.BigTextStyle()
-            .bigText(currentMessage != null ? currentMessage : "")
-            .setBigContentTitle(currentTitle);
-        builder.setStyle(bigTextStyle);
-
-        // Add action buttons
-        if (currentActionTypeId != null) {
-            addActionsToNotification(builder);
-        }
-
-        // Add content intent
-        addContentIntent(builder);
-
-        notificationManager.notify(currentNotificationId, builder.build());
+        // Do nothing - the native chronometer updates automatically
+        // We only update when time is exceeded (via updateNotificationToAlert)
+        // This prevents button flickering caused by frequent notification updates
     }
 
     private void updateNotificationToAlert() {
@@ -344,7 +336,9 @@ public class TimerProgressService extends Service {
             return;
         }
 
-        int flags = PendingIntent.FLAG_CANCEL_CURRENT;
+        // Use FLAG_UPDATE_CURRENT to reuse existing PendingIntents instead of recreating them
+        // This prevents button flickering on notification updates
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             flags = flags | PendingIntent.FLAG_MUTABLE;
         }
@@ -401,7 +395,8 @@ public class TimerProgressService extends Service {
 
     private void addContentIntent(NotificationCompat.Builder builder) {
         Intent intent = buildActionIntent("tap");
-        int flags = PendingIntent.FLAG_CANCEL_CURRENT;
+        // Use FLAG_UPDATE_CURRENT to reuse existing PendingIntent
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             flags = flags | PendingIntent.FLAG_MUTABLE;
         }

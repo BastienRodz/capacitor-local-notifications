@@ -423,8 +423,8 @@ public class LocalNotificationsPlugin extends Plugin {
         // Get channel ID, default to live_activity channel
         String channelId = call.getString("channelId", LIVE_ACTIVITY_CHANNEL_ID);
 
-        // Ensure the channel exists
-        createLiveActivityChannelIfNeeded();
+        // Ensure the channel exists (create the specific channelId, not just default)
+        createLiveActivityChannelIfNeeded(channelId);
 
         // Check if initial vibration is requested
         Boolean shouldVibrate = call.getBoolean("vibrate", true);
@@ -435,14 +435,13 @@ public class LocalNotificationsPlugin extends Plugin {
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
             .setAutoCancel(false)
-            .setPriority(NotificationCompat.PRIORITY_HIGH);
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(true); // Prevent button flickering on updates
         
-        // Vibrate on first show, then silent for updates
+        // Set vibration pattern if requested (will only vibrate on first show due to setOnlyAlertOnce)
         if (shouldVibrate) {
             builder.setVibrate(new long[]{0, 300, 200, 300}); // Vibration pattern
-            builder.setDefaults(NotificationCompat.DEFAULT_LIGHTS);
-        } else {
-            builder.setOnlyAlertOnce(true);
+            builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS);
         }
 
         // Configure timer if present
@@ -552,7 +551,9 @@ public class LocalNotificationsPlugin extends Plugin {
             return;
         }
 
-        int flags = PendingIntent.FLAG_CANCEL_CURRENT;
+        // Use FLAG_UPDATE_CURRENT to reuse existing PendingIntents instead of recreating them
+        // This prevents button flickering/graying on notification updates
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             flags = flags | PendingIntent.FLAG_MUTABLE;
         }
@@ -581,7 +582,8 @@ public class LocalNotificationsPlugin extends Plugin {
      */
     private void addContentIntentToLiveActivity(NotificationCompat.Builder builder, String activityId, int notificationId) {
         Intent intent = buildLiveActivityActionIntent(activityId, notificationId, "tap");
-        int flags = PendingIntent.FLAG_CANCEL_CURRENT;
+        // Use FLAG_UPDATE_CURRENT to reuse existing PendingIntent
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             flags = flags | PendingIntent.FLAG_MUTABLE;
         }
@@ -649,13 +651,15 @@ public class LocalNotificationsPlugin extends Plugin {
             .setOngoing(true)
             .setAutoCancel(false)
             .setPriority(NotificationCompat.PRIORITY_HIGH);
-        
-        // Vibrate if requested (e.g., for alert state), otherwise silent
+
+        // Vibrate if requested (e.g., for alert state)
+        // When vibrating, don't use setOnlyAlertOnce to allow vibration
         if (shouldVibrate) {
             builder.setVibrate(new long[]{0, 500, 250, 500}); // Alert vibration pattern (longer)
-            builder.setDefaults(NotificationCompat.DEFAULT_LIGHTS);
+            builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS);
+            // Don't set setOnlyAlertOnce when we want to vibrate
         } else {
-            builder.setOnlyAlertOnce(true);
+            builder.setOnlyAlertOnce(true); // Silent update - avoid button flickering
         }
 
         // Restore chronometer from config
@@ -758,23 +762,44 @@ public class LocalNotificationsPlugin extends Plugin {
     }
 
     /**
-     * Create the Live Activity notification channel if it doesn't exist.
+     * Create a Live Activity notification channel if it doesn't exist.
+     * Also recreates the channel if it has wrong importance (needed for vibration).
+     * @param channelId The channel ID to create (e.g., "ongoing", "live_activity")
      */
-    private void createLiveActivityChannelIfNeeded() {
+    private void createLiveActivityChannelIfNeeded(String channelId) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            android.app.NotificationChannel channel = notificationManager.getNotificationChannel(LIVE_ACTIVITY_CHANNEL_ID);
-            if (channel == null) {
-                channel = new android.app.NotificationChannel(
-                    LIVE_ACTIVITY_CHANNEL_ID,
-                    "Live Activities",
-                    NotificationManager.IMPORTANCE_LOW // Low importance = no sound
+            String actualChannelId = channelId != null ? channelId : LIVE_ACTIVITY_CHANNEL_ID;
+            android.app.NotificationChannel existingChannel = notificationManager.getNotificationChannel(actualChannelId);
+
+            // Check if channel needs to be recreated due to wrong importance
+            // IMPORTANCE_HIGH (4) is required for vibration to work
+            if (existingChannel != null && existingChannel.getImportance() < NotificationManager.IMPORTANCE_HIGH) {
+                // Delete the old channel with wrong importance
+                notificationManager.deleteNotificationChannel(actualChannelId);
+                existingChannel = null;
+                com.getcapacitor.Logger.debug(com.getcapacitor.Logger.tags("LN"), "Deleted channel " + actualChannelId + " to recreate with higher importance");
+            }
+
+            if (existingChannel == null) {
+                android.app.NotificationChannel channel = new android.app.NotificationChannel(
+                    actualChannelId,
+                    "Activité en cours",
+                    NotificationManager.IMPORTANCE_HIGH // Required for vibration
                 );
-                channel.setDescription("Notifications for active timers and live activities");
+                channel.setDescription("Notifications pour le suivi en temps réel");
                 channel.setSound(null, null); // No sound
-                channel.enableVibration(false);
+                channel.enableVibration(true); // Enable vibration for timers
                 notificationManager.createNotificationChannel(channel);
+                com.getcapacitor.Logger.debug(com.getcapacitor.Logger.tags("LN"), "Created channel " + actualChannelId + " with IMPORTANCE_HIGH");
             }
         }
+    }
+    
+    /**
+     * Create the default Live Activity notification channel if it doesn't exist.
+     */
+    private void createLiveActivityChannelIfNeeded() {
+        createLiveActivityChannelIfNeeded(LIVE_ACTIVITY_CHANNEL_ID);
     }
 
     /**
