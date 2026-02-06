@@ -122,6 +122,10 @@ public class LocalNotificationsHandler: NSObject, NotificationHandlerProtocol {
             }
         }
 
+        if !request.content.threadIdentifier.isEmpty {
+            notification["group"] = request.content.threadIdentifier
+        }
+
         return notification
 
     }

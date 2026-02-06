@@ -17,6 +17,7 @@ import androidx.core.app.NotificationCompat;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.Logger;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -392,9 +393,53 @@ public class LocalNotificationsPlugin extends Plugin {
      * This is needed because notifyListeners is protected in the parent Plugin class.
      */
     public void fireTimerEnded(String activityId) {
+        // Mettre à jour activeLiveActivities avec le nouveau notification ID (exceeded)
+        // pour que endLiveActivity() annule la bonne notification plus tard
+        LiveActivityConfig config = activeLiveActivities.get(activityId);
+        if (config != null) {
+            int exceededNotificationId = config.notificationId + TimerProgressService.EXCEEDED_NOTIFICATION_ID_OFFSET;
+            activeLiveActivities.put(activityId, new LiveActivityConfig(
+                exceededNotificationId,
+                config.title,
+                config.message,
+                config.channelId,
+                config.actionTypeId,
+                config.timer,
+                config.startTimestamp,
+                config.maxDurationMs,
+                false  // Le service s'est arrêté, plus besoin de le stopper
+            ));
+        }
+
         JSObject data = new JSObject();
         data.put("activityId", activityId);
         notifyListeners("liveActivityEnded", data, true);
+    }
+
+    /**
+     * Dismiss an activity automatically after timer end.
+     * Called from TimerEndReceiver to auto-dismiss the notification.
+     * This implements the TTL (Time-To-Live) system.
+     */
+    public void dismissActivityAfterTimerEnd(String activityId) {
+        LiveActivityConfig config = activeLiveActivities.get(activityId);
+        if (config != null) {
+            // Stop the progress service if running
+            if (config.hasProgressService) {
+                TimerProgressService.stopTimer(getContext());
+            }
+            
+            // Cancel the notification
+            notificationManager.cancel(config.notificationId);
+            
+            // Cancel any pending timer alarm
+            cancelTimerEndAlarm(activityId);
+            
+            // Remove from active list
+            activeLiveActivities.remove(activityId);
+            
+            Logger.debug(Logger.tags("LN"), "Auto-dismissed activity after timer end: " + activityId);
+        }
     }
 
     // ============================================
@@ -450,6 +495,7 @@ public class LocalNotificationsPlugin extends Plugin {
         long startTimestamp = System.currentTimeMillis();
         long maxDurationMs = 0;
         boolean hasProgressService = false;
+        Long scheduledAlarmTimestamp = null; // Timestamp unique pour l'alarm
         
         if (timer != null) {
             String mode = timer.getString("mode", "countdown");
@@ -471,13 +517,12 @@ public class LocalNotificationsPlugin extends Plugin {
                     builder.setChronometerCountDown(true);
                 }
 
-                // Optional: schedule alarm for when timer ends
+                // Determine si on doit schedule un alarm
                 Boolean alertOnEnd = timer.getBoolean("alertOnEnd", false);
                 if (alertOnEnd) {
-                    // Use alertTimestamp if provided (for elapsed timers with maxDuration),
-                    // otherwise use targetTimestamp (for countdown timers)
-                    long alertTimestamp = timer.optLong("alertTimestamp", targetTimestamp);
-                    scheduleTimerEndAlarm(id, alertTimestamp);
+                    // For countdown: use targetTimestamp
+                    // For elapsed with maxDuration: use alertTimestamp if provided
+                    scheduledAlarmTimestamp = timer.optLong("alertTimestamp", targetTimestamp);
                 }
                 
                 // For elapsed timers with maxDuration, start the background progress service
@@ -496,6 +541,60 @@ public class LocalNotificationsPlugin extends Plugin {
                     );
                 }
             }
+        }
+
+        // Support for TTL (Time-To-Live) - PRIORITAIRE, remplace scheduledAlarmTimestamp
+        Integer timeToLiveSeconds = call.getInt("timeToLive");
+        if (timeToLiveSeconds != null && timeToLiveSeconds > 0) {
+            if (timer != null) {
+                String mode = timer.getString("mode", "countdown");
+
+                if ("countdown".equals(mode)) {
+                    // Countdown: calculer le timestamp côté Android pour aligner affichage et TTL
+                    long computedTargetTimestamp = System.currentTimeMillis() + (timeToLiveSeconds * 1000L);
+                    scheduledAlarmTimestamp = computedTargetTimestamp;
+
+                    // Aligner le chronometer sur le timestamp calculé côté Android
+                    builder.setUsesChronometer(true);
+                    builder.setWhen(computedTargetTimestamp);
+                    builder.setShowWhen(true);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        builder.setChronometerCountDown(true);
+                    }
+
+                    Logger.debug(Logger.tags("LN"), "TTL Sync: countdown computed target = " + computedTargetTimestamp);
+                } else {
+                    // Elapsed: utiliser startTimestamp + maxDurationMs (timestamps absolus)
+                    long startTimestampVal = timer.optLong("startTimestamp", System.currentTimeMillis());
+                    long maxDurationMsVal = timer.optLong("maxDurationMs", 0);
+
+                    if (maxDurationMsVal > 0) {
+                        scheduledAlarmTimestamp = startTimestampVal + maxDurationMsVal;
+                        Logger.debug(Logger.tags("LN"), "TTL Sync: elapsed absolute target = " + scheduledAlarmTimestamp);
+                    } else {
+                        // Fallback: calculer depuis maintenant si maxDurationMs manquant
+                        scheduledAlarmTimestamp = System.currentTimeMillis() + (timeToLiveSeconds * 1000L);
+                        Logger.debug(Logger.tags("LN"), "TTL Sync: fallback elapsed relative = " + scheduledAlarmTimestamp);
+                    }
+                }
+            } else {
+                // Notification sans timer: calcul relatif
+                scheduledAlarmTimestamp = System.currentTimeMillis() + (timeToLiveSeconds * 1000L);
+                Logger.debug(Logger.tags("LN"), "TTL Sync: relative no-timer = " + scheduledAlarmTimestamp);
+            }
+
+            // Utiliser timeoutAfter si disponible pour suppression native précise
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                builder.setTimeoutAfter(timeToLiveSeconds * 1000L);
+            }
+        }
+
+        // Schedule l'alarm UNE SEULE FOIS si necessaire
+        if (scheduledAlarmTimestamp != null) {
+            long currentTime = System.currentTimeMillis();
+            scheduleTimerEndAlarm(id, scheduledAlarmTimestamp);
+            long delaySeconds = (scheduledAlarmTimestamp - currentTime) / 1000;
+            Logger.debug(Logger.tags("LN"), "Scheduled alarm for " + id + " in " + delaySeconds + " seconds (current=" + currentTime + ", target=" + scheduledAlarmTimestamp + ")");
         }
 
         // Configure progress bar if present

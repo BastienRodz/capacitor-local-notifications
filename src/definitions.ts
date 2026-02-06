@@ -581,6 +581,18 @@ export interface PendingLocalNotificationSchema {
    * @since 1.0.0
    */
   extra?: any;
+
+  /**
+   * Used to group multiple notifications.
+   *
+   * On Android, maps to `NotificationCompat.Builder.setGroup()`.
+   * On iOS, maps to `UNNotificationContent.threadIdentifier`.
+   *
+   * Only returned if the notification was created with a group.
+   *
+   * @since 6.2.0
+   */
+  group?: string;
 }
 
 export interface LocalNotificationSchema {
@@ -747,7 +759,7 @@ export interface LocalNotificationSchema {
    * Sets `threadIdentifier` on the
    * [`UNMutableNotificationContent`](https://developer.apple.com/documentation/usernotifications/unmutablenotificationcontent).
    *
-   * Only available for iOS.
+   * iOS-specific alias for `group`. Prefer using `group` for cross-platform compatibility.
    *
    * @since 1.0.0
    */
@@ -768,11 +780,8 @@ export interface LocalNotificationSchema {
   /**
    * Used to group multiple notifications.
    *
-   * Calls `setGroup()` on
-   * [`NotificationCompat.Builder`](https://developer.android.com/reference/androidx/core/app/NotificationCompat.Builder)
-   * with the provided value.
-   *
-   * Only available for Android.
+   * Cross-platform. On Android, maps to `NotificationCompat.Builder.setGroup()`.
+   * On iOS, maps to `UNNotificationContent.threadIdentifier`.
    *
    * @since 1.0.0
    */
@@ -1359,6 +1368,23 @@ export interface LiveActivityOptions {
    * @since 7.2.0
    */
   vibrate?: boolean;
+
+  /**
+   * iOS only: Timestamp (ms since epoch) when the activity should become "stale".
+   * iOS automatically marks the activity as stale at this time, even in background.
+   * The widget can detect this via context.isStale and update its UI accordingly.
+   *
+   * @since 7.2.0
+   */
+  staleDateTimestamp?: number;
+
+  /**
+   * Time to live in seconds. After this duration, the activity will be dismissed.
+   * Also sets the staleDate if staleDateTimestamp is not provided.
+   *
+   * @since 7.2.0
+   */
+  timeToLive?: number;
 }
 
 /**

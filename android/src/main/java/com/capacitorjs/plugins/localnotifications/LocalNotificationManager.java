@@ -358,8 +358,23 @@ public class LocalNotificationManager {
         // Schedule at specific time (with repeating support)
         Date at = schedule.getAt();
         if (at != null) {
-            if (at.getTime() < new Date().getTime()) {
-                Logger.error(Logger.tags("LN"), "Scheduled time must be *after* current time", null);
+            // Enforce 5-second minimum lead time to prevent race conditions
+            long MIN_SCHEDULE_LEAD_TIME = 5000; // 5 seconds minimum
+            long currentTime = new Date().getTime();
+            long scheduledTime = at.getTime();
+
+            if (scheduledTime < currentTime + MIN_SCHEDULE_LEAD_TIME) {
+                String error = String.format(
+                    "Scheduled time must be at least 5 seconds in future. Scheduled: %d (%s), Now: %d (%s), Delta: %dms",
+                    scheduledTime,
+                    at.toString(),
+                    currentTime,
+                    new Date(currentTime).toString(),
+                    scheduledTime - currentTime
+                );
+                Logger.error(Logger.tags("LN"), error, null);
+                // Note: 'call' is not available in this context, so we can only log the error
+                // The JavaScript layer should have already validated with a 10-second buffer
                 return;
             }
             if (schedule.isRepeating()) {

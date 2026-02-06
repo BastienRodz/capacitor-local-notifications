@@ -2,6 +2,8 @@ import Foundation
 import Capacitor
 import UserNotifications
 import ActivityKit
+import UIKit
+import AudioToolbox
 
 enum LocalNotificationError: LocalizedError {
     case contentNoId
@@ -52,11 +54,73 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "getActiveLiveActivities", returnType: CAPPluginReturnPromise)
     ]
     private let notificationDelegationHandler = LocalNotificationsHandler()
+    private var activityTimers: [String: Timer] = [:]
 
     override public func load() {
         self.bridge?.notificationRouter.localNotificationHandler = self.notificationDelegationHandler
         self.notificationDelegationHandler.plugin = self
         self.shouldStringifyDatesInCalls = false
+
+        // Listen for Live Activity actions from URL scheme
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleLiveActivityAction(_:)),
+            name: NSNotification.Name("LiveActivityAction"),
+            object: nil
+        )
+
+        // Process any pending Live Activity actions after a short delay
+        // This handles cold start case where actions arrive before JS listeners are ready
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.processPendingLiveActivityActions()
+        }
+    }
+
+    private func processPendingLiveActivityActions() {
+        // Access pending actions from UserDefaults
+        guard let pendingActions = UserDefaults.standard.array(forKey: "pendingLiveActivityActions") as? [[String: String]],
+              !pendingActions.isEmpty else {
+            return
+        }
+
+        CAPLog.print("[LN] 📬 Found \(pendingActions.count) pending Live Activity action(s)")
+
+        for params in pendingActions {
+            guard let actionId = params["action"],
+                  let activityId = params["activityId"] else {
+                continue
+            }
+
+            CAPLog.print("[LN] 📬 Processing pending action: \(actionId) for \(activityId)")
+
+            self.notifyListeners("localNotificationActionPerformed", data: [
+                "actionId": actionId,
+                "notification": [
+                    "id": activityId,
+                    "extra": ["liveActivityId": activityId]
+                ]
+            ])
+        }
+
+        // Clear pending actions
+        UserDefaults.standard.removeObject(forKey: "pendingLiveActivityActions")
+    }
+    
+    @objc private func handleLiveActivityAction(_ notification: Notification) {
+        guard let userInfo = notification.userInfo as? [String: String],
+              let actionId = userInfo["action"],
+              let activityId = userInfo["activityId"] else {
+            return
+        }
+        
+        // Emit as localNotificationActionPerformed for compatibility
+        self.notifyListeners("localNotificationActionPerformed", data: [
+            "actionId": actionId,
+            "notification": [
+                "id": activityId,
+                "extra": ["liveActivityId": activityId]
+            ]
+        ])
     }
 
     /**
@@ -259,6 +323,8 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
 
         if let threadIdentifier = notification["threadIdentifier"] as? String {
             content.threadIdentifier = threadIdentifier
+        } else if let group = notification["group"] as? String {
+            content.threadIdentifier = group
         }
 
         if let summaryArgument = notification["summaryArgument"] as? String {
@@ -648,6 +714,7 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
      * Uses ActivityKit on iOS 16.1+, falls back to regular notification on older versions.
      */
     @objc func startLiveActivity(_ call: CAPPluginCall) {
+        NSLog("[LN] ⚡️ startLiveActivity called")
         CAPLog.print("[LN] ⚡️ startLiveActivity called")
         
         guard let id = call.getString("id") else {
@@ -717,14 +784,74 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
                     timerTargetTimestamp: timerTargetTimestamp
                 )
 
+                // Set staleDate - iOS will automatically mark the activity as "stale" at this time
+                // This works even when the app is in background!
+                // Priority: explicit staleDateTimestamp > timeToLive > nil
+                var staleDate: Date? = nil
+
+                // Debug: Log all received parameters
+                NSLog("[LN] 📊 DEBUG - Received staleDateTimestamp raw: %@", String(describing: call.options["staleDateTimestamp"]))
+                NSLog("[LN] 📊 DEBUG - Received timeToLive raw: %@", String(describing: call.options["timeToLive"]))
+                CAPLog.print("[LN] 📊 DEBUG - Received staleDateTimestamp raw: \(String(describing: call.options["staleDateTimestamp"]))")
+                CAPLog.print("[LN] 📊 DEBUG - Received timeToLive raw: \(String(describing: call.options["timeToLive"]))")
+
+                // Try multiple ways to get staleDateTimestamp (could be Int, Double, or NSNumber)
+                var staleDateTimestamp: Double? = nil
+                if let value = call.getDouble("staleDateTimestamp") {
+                    staleDateTimestamp = value
+                    CAPLog.print("[LN] 📊 DEBUG - staleDateTimestamp from getDouble: \(value)")
+                } else if let value = call.options["staleDateTimestamp"] as? NSNumber {
+                    staleDateTimestamp = value.doubleValue
+                    CAPLog.print("[LN] 📊 DEBUG - staleDateTimestamp from NSNumber: \(value.doubleValue)")
+                } else if let value = call.options["staleDateTimestamp"] as? Int {
+                    staleDateTimestamp = Double(value)
+                    CAPLog.print("[LN] 📊 DEBUG - staleDateTimestamp from Int: \(value)")
+                }
+
+                if let timestamp = staleDateTimestamp {
+                    // staleDateTimestamp is in milliseconds (JS Date.now() format)
+                    staleDate = Date(timeIntervalSince1970: timestamp / 1000)
+                    let secondsUntilStale = staleDate!.timeIntervalSinceNow
+                    NSLog("[LN] 📅 staleDate set! timestamp=%f, staleDate=%@, in %d seconds", timestamp, staleDate! as NSDate, Int(secondsUntilStale))
+                    CAPLog.print("[LN] 📅 staleDate set from staleDateTimestamp: \(staleDate!)")
+                } else if let timeToLive = call.getInt("timeToLive") {
+                    staleDate = Date(timeIntervalSinceNow: TimeInterval(timeToLive))
+                    CAPLog.print("[LN] 📅 staleDate set from timeToLive: \(staleDate!)")
+                } else {
+                    NSLog("[LN] ⚠️ Neither staleDateTimestamp nor timeToLive found in call options!")
+                    CAPLog.print("[LN] ⚠️ Neither staleDateTimestamp nor timeToLive found in call options")
+                }
+
+                // Log staleDate details for debugging
+                if let sd = staleDate {
+                    let now = Date()
+                    let secondsUntilStale = sd.timeIntervalSince(now)
+                    CAPLog.print("[LN] 📅 staleDate in \(Int(secondsUntilStale)) seconds (at \(sd))")
+                } else {
+                    CAPLog.print("[LN] ⚠️ No staleDate set - activity will never become stale automatically")
+                }
+
                 CAPLog.print("[LN] 📝 Requesting activity...")
                 let activity = try Activity<GenericTimerAttributes>.request(
                     attributes: attributes,
-                    content: .init(state: initialState, staleDate: nil),
+                    content: .init(state: initialState, staleDate: staleDate),
                     pushType: nil
                 )
 
                 CAPLog.print("[LN] ✅ Live Activity created successfully with id: \(activity.id)")
+                if let timeToLive = call.getInt("timeToLive"), timeToLive > 0 {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.activityTimers[id]?.invalidate()
+                        let timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(timeToLive), repeats: false) { [weak self] _ in
+                            Task {
+                                await activity.end(nil, dismissalPolicy: .immediate)
+                                self?.notifyListeners("liveActivityEnded", data: ["activityId": id])
+                                self?.activityTimers.removeValue(forKey: id)
+                            }
+                        }
+                        self?.activityTimers[id] = timer
+                    }
+                }
                 call.resolve([
                     "activityId": activity.id
                 ])
@@ -750,20 +877,30 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
+        NSLog("[LN] 🔄 updateLiveActivity called for id: %@", id)
+
         if #available(iOS 16.1, *) {
             let message = call.getString("message")
             let contentState = call.getObject("contentState") ?? [:]
+            let shouldVibrate = call.getBool("vibrate") ?? false
+
+            NSLog("[LN] 🔄 contentState: %@, vibrate: %@", String(describing: contentState), shouldVibrate ? "true" : "false")
 
             Task {
                 // Find the activity with matching ID
+                let activitiesCount = Activity<GenericTimerAttributes>.activities.count
+                NSLog("[LN] 🔄 Looking for activity in %d active activities", activitiesCount)
+
                 for activity in Activity<GenericTimerAttributes>.activities {
+                    NSLog("[LN] 🔄 Checking activity: %@ vs %@", activity.attributes.id, id)
                     if activity.attributes.id == id {
+                        NSLog("[LN] ✅ Found matching activity, updating...")
                         // Merge new values with existing values (instead of replacing)
                         var mergedValues = activity.content.state.values
                         for (key, value) in contentState.compactMapValues({ "\($0)" }) {
                             mergedValues[key] = value
                         }
-                        
+
                         let updatedState = GenericTimerAttributes.TimerContentState(
                             message: message ?? activity.content.state.message,
                             values: mergedValues,
@@ -771,15 +908,51 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
                             timerTargetTimestamp: activity.content.state.timerTargetTimestamp
                         )
 
-                        await activity.update(ActivityContent(state: updatedState, staleDate: nil))
+                        // Preserve existing staleDate so iOS automatic stale detection keeps working.
+                        // Without this, updateLiveActivity would reset staleDate to nil and the widget
+                        // would lose its ability to detect exceeded state in background.
+                        let existingStaleDate = activity.content.staleDate
+
+                        // Update Live Activity with alert configuration for vibration (iOS 16.2+)
+                        if #available(iOS 16.2, *), shouldVibrate {
+                            let titleText = call.getString("title") ?? "Alerte"
+                            let bodyText = message ?? ""
+                            let alertConfig = AlertConfiguration(
+                                title: "\(titleText)",
+                                body: "\(bodyText)",
+                                sound: .default
+                            )
+                            await activity.update(
+                                ActivityContent(state: updatedState, staleDate: existingStaleDate),
+                                alertConfiguration: alertConfig
+                            )
+                            CAPLog.print("[LN] 📳 Live Activity updated with alert (vibration), staleDate preserved: \(String(describing: existingStaleDate))")
+                        } else {
+                            await activity.update(ActivityContent(state: updatedState, staleDate: existingStaleDate))
+                        }
+
+                        // Also trigger haptic feedback if app is in foreground
+                        if shouldVibrate {
+                            CAPLog.print("[LN] 📳 Triggering additional haptic feedback")
+                            NSLog("[LN] 📳 Triggering haptic feedback")
+                            await MainActor.run {
+                                let generator = UINotificationFeedbackGenerator()
+                                generator.prepare()
+                                generator.notificationOccurred(.error)
+                                AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+                            }
+                        }
+
+                        NSLog("[LN] ✅ Live Activity update completed successfully")
                         call.resolve()
                         return
                     }
                 }
+                NSLog("[LN] ❌ No matching activity found for id: %@", id)
                 call.reject("No active Live Activity with id: \(id)")
             }
         } else {
-            call.reject("Live Activities require iOS 16.1+")
+             call.reject("Live Activities require iOS 16.1+")
         }
     }
 
@@ -790,6 +963,11 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
         guard let id = call.getString("id") else {
             call.reject("id is required")
             return
+        }
+
+        if let timer = self.activityTimers[id] {
+            timer.invalidate()
+            self.activityTimers.removeValue(forKey: id)
         }
 
         if #available(iOS 16.1, *) {

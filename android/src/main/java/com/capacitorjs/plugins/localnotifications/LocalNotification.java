@@ -379,6 +379,8 @@ public class LocalNotification {
             }
 
             jsNotification.put("extra", notification.getExtra());
+            jsNotification.put("group", notification.getGroup());
+            jsNotification.put("groupSummary", notification.isGroupSummary());
 
             jsArray.put(jsNotification);
         }

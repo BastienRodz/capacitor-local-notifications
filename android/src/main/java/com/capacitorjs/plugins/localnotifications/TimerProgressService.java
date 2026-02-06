@@ -52,6 +52,9 @@ public class TimerProgressService extends Service {
     private NotificationManager notificationManager;
     private NotificationStorage notificationStorage;
 
+    // Offset pour générer un ID de notification distinct pour l'état exceeded
+    static final int EXCEEDED_NOTIFICATION_ID_OFFSET = 10000;
+
     // Current timer state
     private String currentActivityId;
     private int currentNotificationId;
@@ -234,8 +237,10 @@ public class TimerProgressService extends Service {
             @Override
             public void run() {
                 updateProgress();
-                // Continue updating as long as service is running
-                handler.postDelayed(this, UPDATE_INTERVAL_MS);
+                // Continue uniquement si pas arrêté (exceeded ou service stoppé)
+                if (updateRunnable != null) {
+                    handler.postDelayed(this, UPDATE_INTERVAL_MS);
+                }
             }
         };
 
@@ -266,10 +271,16 @@ public class TimerProgressService extends Service {
         if (isExceeded && !hasExceeded) {
             hasExceeded = true;
             saveTimerConfig();
-            Logger.debug(Logger.tags("LN"), TAG + ": Timer exceeded! Updating to alert state");
-            updateNotificationToAlert();
-            
-            // Notify JavaScript layer
+            Logger.debug(Logger.tags("LN"), TAG + ": Timer exceeded! Replacing with exceeded notification");
+            replaceWithExceededNotification();
+
+            // Arrêter le handler - plus besoin de vérifications périodiques
+            if (updateRunnable != null) {
+                handler.removeCallbacks(updateRunnable);
+                updateRunnable = null;
+            }
+
+            // Notify JavaScript layer (sans auto-dismiss - la notification exceeded reste visible)
             LocalNotificationsPlugin plugin = LocalNotificationsPlugin.getLocalNotificationsInstance();
             if (plugin != null) {
                 plugin.fireTimerEnded(currentActivityId);
@@ -288,16 +299,32 @@ public class TimerProgressService extends Service {
 
     private void updateNotificationProgress(int progressPercent) {
         // Do nothing - the native chronometer updates automatically
-        // We only update when time is exceeded (via updateNotificationToAlert)
+        // We only update when time is exceeded (via replaceWithExceededNotification)
         // This prevents button flickering caused by frequent notification updates
     }
 
-    private void updateNotificationToAlert() {
-        String alertTitle = "⚠️ DURÉE DÉPASSÉE";
+    /**
+     * Remplace la notification de timer en cours par une nouvelle notification "DURÉE DÉPASSÉE".
+     * Annule l'ancienne notification et en crée une nouvelle avec un ID distinct,
+     * qui garde le chronometer depuis startTimestamp et vibre pour alerter l'utilisateur.
+     * Bascule le foreground service sur la nouvelle notification.
+     */
+    private void replaceWithExceededNotification() {
+        String alertTitle = "DURÉE DÉPASSÉE";
         String alertMessage = "Temps de stationnement dépassé";
 
-        String channelId = currentChannelId != null ? currentChannelId : DEFAULT_CHANNEL_ID;
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, channelId)
+        // Sauvegarder l'ancien ID et calculer le nouveau
+        int oldNotificationId = currentNotificationId;
+        int exceededNotificationId = currentNotificationId + EXCEEDED_NOTIFICATION_ID_OFFSET;
+
+        // Mettre à jour l'ID courant AVANT de construire les PendingIntents
+        currentNotificationId = exceededNotificationId;
+
+        // Utiliser le canal ALERTS pour importance HIGH (vibration + heads-up)
+        String alertChannelId = "alerts";
+        ensureAlertChannel(alertChannelId);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, alertChannelId)
             .setContentTitle(alertTitle)
             .setContentText(alertMessage)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
@@ -308,8 +335,7 @@ public class TimerProgressService extends Service {
             .setWhen(startTimestamp)
             .setShowWhen(true)
             .setProgress(100, 100, false)
-            // Important: NE PAS utiliser setOnlyAlertOnce pour permettre la vibration
-            // Vibration pour l'alerte
+            // NE PAS utiliser setOnlyAlertOnce pour permettre la vibration
             .setVibrate(new long[]{0, 500, 250, 500, 250, 500})
             .setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS | NotificationCompat.DEFAULT_SOUND);
 
@@ -319,7 +345,7 @@ public class TimerProgressService extends Service {
             .setBigContentTitle(alertTitle);
         builder.setStyle(bigTextStyle);
 
-        // Add action buttons
+        // Add action buttons (utilise currentNotificationId = exceededNotificationId)
         if (currentActionTypeId != null) {
             addActionsToNotification(builder);
         }
@@ -327,7 +353,54 @@ public class TimerProgressService extends Service {
         // Add content intent
         addContentIntent(builder);
 
-        notificationManager.notify(currentNotificationId, builder.build());
+        // Swap atomique : startForeground() avec le nouvel ID remplace la notification
+        // du foreground service sans timing window (pas de stopForeground préalable
+        // qui pourrait tuer le service entre les deux appels)
+        startForeground(exceededNotificationId, builder.build());
+
+        // Annuler l'ancienne notification (ID différent du foreground actuel)
+        notificationManager.cancel(oldNotificationId);
+
+        // Détacher la notification du service pour qu'elle persiste indépendamment
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_DETACH);
+        } else {
+            stopForeground(false);
+        }
+
+        Logger.debug(Logger.tags("LN"), TAG + ": Replaced notification with exceeded alert, new ID=" + exceededNotificationId);
+
+        // Le service n'a plus besoin de tourner - la notification persiste seule
+        stopSelf();
+    }
+
+    /**
+     * S'assurer que le canal d'alertes existe avec IMPORTANCE_HIGH
+     */
+    private void ensureAlertChannel(String channelId) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel existingChannel = notificationManager.getNotificationChannel(channelId);
+
+            // Si le canal existe avec une importance insuffisante, le recréer
+            if (existingChannel != null && existingChannel.getImportance() < NotificationManager.IMPORTANCE_HIGH) {
+                notificationManager.deleteNotificationChannel(channelId);
+                existingChannel = null;
+                Logger.debug(Logger.tags("LN"), TAG + ": Deleted alert channel " + channelId + " to recreate with higher importance");
+            }
+
+            if (existingChannel == null) {
+                NotificationChannel channel = new NotificationChannel(
+                    channelId,
+                    "Alertes",
+                    NotificationManager.IMPORTANCE_HIGH
+                );
+                channel.setDescription("Alertes importantes nécessitant votre attention");
+                channel.enableVibration(true);
+                channel.setVibrationPattern(new long[]{0, 500, 250, 500, 250, 500});
+                notificationManager.createNotificationChannel(channel);
+                Logger.debug(Logger.tags("LN"), TAG + ": Created alert channel " + channelId);
+            }
+        }
     }
 
     private void addActionsToNotification(NotificationCompat.Builder builder) {
