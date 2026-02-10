@@ -48,12 +48,13 @@ public class LocalNotificationsPlugin extends Plugin {
     public NotificationManager notificationManager;
     private NotificationStorage notificationStorage;
     private NotificationChannelManager notificationChannelManager;
-    
+
     // Store active live activities: activityId -> LiveActivityConfig
     private final Map<String, LiveActivityConfig> activeLiveActivities = new HashMap<>();
-    
+
     // Configuration d'une Live Activity pour pouvoir la mettre à jour
     private static class LiveActivityConfig {
+
         int notificationId;
         String title;
         String message;
@@ -63,10 +64,18 @@ public class LocalNotificationsPlugin extends Plugin {
         long startTimestamp;
         long maxDurationMs;
         boolean hasProgressService;
-        
-        LiveActivityConfig(int notificationId, String title, String message, String channelId, 
-                          String actionTypeId, JSObject timer, long startTimestamp, long maxDurationMs,
-                          boolean hasProgressService) {
+
+        LiveActivityConfig(
+            int notificationId,
+            String title,
+            String message,
+            String channelId,
+            String actionTypeId,
+            JSObject timer,
+            long startTimestamp,
+            long maxDurationMs,
+            boolean hasProgressService
+        ) {
             this.notificationId = notificationId;
             this.title = title;
             this.message = message;
@@ -88,11 +97,11 @@ public class LocalNotificationsPlugin extends Plugin {
         notificationChannelManager = new NotificationChannelManager(getActivity());
         notificationManager = (NotificationManager) getActivity().getSystemService(Context.NOTIFICATION_SERVICE);
         staticBridge = this.bridge;
-        
+
         // Handle notification action from launch intent (when app was closed)
         handleLaunchIntent();
     }
-    
+
     /**
      * Handle notification action from the launch intent.
      * This is called when the app is launched from a notification action
@@ -100,22 +109,29 @@ public class LocalNotificationsPlugin extends Plugin {
      */
     private void handleLaunchIntent() {
         if (getActivity() == null) return;
-        
+
         Intent launchIntent = getActivity().getIntent();
         if (launchIntent == null) return;
-        
+
         // Check if this intent contains notification action data
         if (launchIntent.hasExtra(LocalNotificationManager.ACTION_INTENT_KEY)) {
             // Delay processing to ensure bridge is ready
-            getActivity().runOnUiThread(() -> {
-                // Small delay to ensure JavaScript is ready
-                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                    JSObject dataJson = manager.handleNotificationActionPerformed(launchIntent, notificationStorage);
-                    if (dataJson != null) {
-                        notifyListeners("localNotificationActionPerformed", dataJson, true);
+            getActivity()
+                .runOnUiThread(
+                    () -> {
+                        // Small delay to ensure JavaScript is ready
+                        new android.os.Handler(android.os.Looper.getMainLooper())
+                            .postDelayed(
+                                () -> {
+                                    JSObject dataJson = manager.handleNotificationActionPerformed(launchIntent, notificationStorage);
+                                    if (dataJson != null) {
+                                        notifyListeners("localNotificationActionPerformed", dataJson, true);
+                                    }
+                                },
+                                500
+                            );
                     }
-                }, 500);
-            });
+                );
         }
     }
 
@@ -130,14 +146,14 @@ public class LocalNotificationsPlugin extends Plugin {
             notifyListeners("localNotificationActionPerformed", dataJson, true);
         }
     }
-    
+
     @Override
     protected void handleOnDestroy() {
         super.handleOnDestroy();
         // End all Live Activities when app is destroyed
         endAllLiveActivities();
     }
-    
+
     /**
      * End all active Live Activities.
      * Called when the app is destroyed to clean up ongoing notifications.
@@ -145,7 +161,7 @@ public class LocalNotificationsPlugin extends Plugin {
     private void endAllLiveActivities() {
         // Stop the timer progress service
         TimerProgressService.stopTimer(getContext());
-        
+
         // Cancel all ongoing notifications
         for (String activityId : activeLiveActivities.keySet()) {
             LiveActivityConfig config = activeLiveActivities.get(activityId);
@@ -398,17 +414,20 @@ public class LocalNotificationsPlugin extends Plugin {
         LiveActivityConfig config = activeLiveActivities.get(activityId);
         if (config != null) {
             int exceededNotificationId = config.notificationId + TimerProgressService.EXCEEDED_NOTIFICATION_ID_OFFSET;
-            activeLiveActivities.put(activityId, new LiveActivityConfig(
-                exceededNotificationId,
-                config.title,
-                config.message,
-                config.channelId,
-                config.actionTypeId,
-                config.timer,
-                config.startTimestamp,
-                config.maxDurationMs,
-                false  // Le service s'est arrêté, plus besoin de le stopper
-            ));
+            activeLiveActivities.put(
+                activityId,
+                new LiveActivityConfig(
+                    exceededNotificationId,
+                    config.title,
+                    config.message,
+                    config.channelId,
+                    config.actionTypeId,
+                    config.timer,
+                    config.startTimestamp,
+                    config.maxDurationMs,
+                    false // Le service s'est arrêté, plus besoin de le stopper
+                )
+            );
         }
 
         JSObject data = new JSObject();
@@ -428,16 +447,16 @@ public class LocalNotificationsPlugin extends Plugin {
             if (config.hasProgressService) {
                 TimerProgressService.stopTimer(getContext());
             }
-            
+
             // Cancel the notification
             notificationManager.cancel(config.notificationId);
-            
+
             // Cancel any pending timer alarm
             cancelTimerEndAlarm(activityId);
-            
+
             // Remove from active list
             activeLiveActivities.remove(activityId);
-            
+
             Logger.debug(Logger.tags("LN"), "Auto-dismissed activity after timer end: " + activityId);
         }
     }
@@ -473,7 +492,7 @@ public class LocalNotificationsPlugin extends Plugin {
 
         // Check if initial vibration is requested
         Boolean shouldVibrate = call.getBoolean("vibrate", true);
-        
+
         NotificationCompat.Builder builder = new NotificationCompat.Builder(getContext(), channelId)
             .setContentTitle(title)
             .setContentText(message != null ? message : "")
@@ -482,10 +501,10 @@ public class LocalNotificationsPlugin extends Plugin {
             .setAutoCancel(false)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOnlyAlertOnce(true); // Prevent button flickering on updates
-        
+
         // Set vibration pattern if requested (will only vibrate on first show due to setOnlyAlertOnce)
         if (shouldVibrate) {
-            builder.setVibrate(new long[]{0, 300, 200, 300}); // Vibration pattern
+            builder.setVibrate(new long[] { 0, 300, 200, 300 }); // Vibration pattern
             builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS);
         }
 
@@ -496,12 +515,12 @@ public class LocalNotificationsPlugin extends Plugin {
         long maxDurationMs = 0;
         boolean hasProgressService = false;
         Long scheduledAlarmTimestamp = null; // Timestamp unique pour l'alarm
-        
+
         if (timer != null) {
             String mode = timer.getString("mode", "countdown");
             // Use optLong to avoid JSONException - returns 0 if not found
             long targetTimestamp = timer.optLong("targetTimestamp", 0);
-            
+
             // Get maxDuration for elapsed timers
             maxDurationMs = timer.optLong("maxDurationMs", 0);
             startTimestamp = timer.optLong("startTimestamp", System.currentTimeMillis());
@@ -524,7 +543,7 @@ public class LocalNotificationsPlugin extends Plugin {
                     // For elapsed with maxDuration: use alertTimestamp if provided
                     scheduledAlarmTimestamp = timer.optLong("alertTimestamp", targetTimestamp);
                 }
-                
+
                 // For elapsed timers with maxDuration, start the background progress service
                 if ("elapsed".equals(mode) && maxDurationMs > 0) {
                     hasProgressService = true;
@@ -594,7 +613,18 @@ public class LocalNotificationsPlugin extends Plugin {
             long currentTime = System.currentTimeMillis();
             scheduleTimerEndAlarm(id, scheduledAlarmTimestamp);
             long delaySeconds = (scheduledAlarmTimestamp - currentTime) / 1000;
-            Logger.debug(Logger.tags("LN"), "Scheduled alarm for " + id + " in " + delaySeconds + " seconds (current=" + currentTime + ", target=" + scheduledAlarmTimestamp + ")");
+            Logger.debug(
+                Logger.tags("LN"),
+                "Scheduled alarm for " +
+                id +
+                " in " +
+                delaySeconds +
+                " seconds (current=" +
+                currentTime +
+                ", target=" +
+                scheduledAlarmTimestamp +
+                ")"
+            );
         }
 
         // Configure progress bar if present
@@ -624,10 +654,20 @@ public class LocalNotificationsPlugin extends Plugin {
         addContentIntentToLiveActivity(builder, id, notificationId);
 
         // Store configuration for updates BEFORE showing notification
-        activeLiveActivities.put(id, new LiveActivityConfig(
-            notificationId, title, message, channelId, actionTypeId, timer, 
-            startTimestamp, maxDurationMs, hasProgressService
-        ));
+        activeLiveActivities.put(
+            id,
+            new LiveActivityConfig(
+                notificationId,
+                title,
+                message,
+                channelId,
+                actionTypeId,
+                timer,
+                startTimestamp,
+                maxDurationMs,
+                hasProgressService
+            )
+        );
 
         // Show the notification only if the service won't handle it
         // When hasProgressService is true, the foreground service shows the notification
@@ -706,13 +746,13 @@ public class LocalNotificationsPlugin extends Plugin {
         intent.putExtra(LocalNotificationManager.ACTION_INTENT_KEY, actionId);
         intent.putExtra("liveActivityId", activityId);
         intent.putExtra(LocalNotificationManager.NOTIFICATION_IS_REMOVABLE_KEY, true);
-        
+
         // Build a minimal notification JSON for the action handler
         JSObject notificationObj = new JSObject();
         notificationObj.put("id", notificationId);
         notificationObj.put("liveActivityId", activityId);
         intent.putExtra(LocalNotificationManager.NOTIFICATION_OBJ_INTENT_KEY, notificationObj.toString());
-        
+
         return intent;
     }
 
@@ -735,11 +775,11 @@ public class LocalNotificationsPlugin extends Plugin {
 
         String title = call.getString("title");
         String message = call.getString("message");
-        
+
         // Use stored config or provided values
         String finalTitle = title != null ? title : config.title;
         String finalMessage = message != null ? message : (config.message != null ? config.message : "");
-        
+
         // Check if vibration is requested (for alert state)
         Boolean shouldVibrate = call.getBoolean("vibrate", false);
 
@@ -754,7 +794,7 @@ public class LocalNotificationsPlugin extends Plugin {
         // Vibrate if requested (e.g., for alert state)
         // When vibrating, don't use setOnlyAlertOnce to allow vibration
         if (shouldVibrate) {
-            builder.setVibrate(new long[]{0, 500, 250, 500}); // Alert vibration pattern (longer)
+            builder.setVibrate(new long[] { 0, 500, 250, 500 }); // Alert vibration pattern (longer)
             builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS);
             // Don't set setOnlyAlertOnce when we want to vibrate
         } else {
@@ -765,12 +805,12 @@ public class LocalNotificationsPlugin extends Plugin {
         if (config.timer != null) {
             String mode = config.timer.getString("mode", "countdown");
             long targetTimestamp = config.timer.optLong("targetTimestamp", 0);
-            
+
             if (targetTimestamp > 0) {
                 builder.setUsesChronometer(true);
                 builder.setWhen(targetTimestamp);
                 builder.setShowWhen(true);
-                
+
                 if ("countdown".equals(mode) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     builder.setChronometerCountDown(true);
                 }
@@ -830,13 +870,13 @@ public class LocalNotificationsPlugin extends Plugin {
             if (config.hasProgressService) {
                 TimerProgressService.stopTimer(getContext());
             }
-            
+
             // Cancel the notification
             notificationManager.cancel(config.notificationId);
-            
+
             // Cancel any pending alarm
             cancelTimerEndAlarm(id);
-            
+
             // Remove from tracking
             activeLiveActivities.remove(id);
         }
@@ -851,11 +891,11 @@ public class LocalNotificationsPlugin extends Plugin {
     public void getActiveLiveActivities(PluginCall call) {
         JSObject result = new JSObject();
         JSArray activities = new JSArray();
-        
+
         for (String activityId : activeLiveActivities.keySet()) {
             activities.put(activityId);
         }
-        
+
         result.put("activities", activities);
         call.resolve(result);
     }
@@ -876,7 +916,10 @@ public class LocalNotificationsPlugin extends Plugin {
                 // Delete the old channel with wrong importance
                 notificationManager.deleteNotificationChannel(actualChannelId);
                 existingChannel = null;
-                com.getcapacitor.Logger.debug(com.getcapacitor.Logger.tags("LN"), "Deleted channel " + actualChannelId + " to recreate with higher importance");
+                com.getcapacitor.Logger.debug(
+                    com.getcapacitor.Logger.tags("LN"),
+                    "Deleted channel " + actualChannelId + " to recreate with higher importance"
+                );
             }
 
             if (existingChannel == null) {
@@ -889,11 +932,14 @@ public class LocalNotificationsPlugin extends Plugin {
                 channel.setSound(null, null); // No sound
                 channel.enableVibration(true); // Enable vibration for timers
                 notificationManager.createNotificationChannel(channel);
-                com.getcapacitor.Logger.debug(com.getcapacitor.Logger.tags("LN"), "Created channel " + actualChannelId + " with IMPORTANCE_HIGH");
+                com.getcapacitor.Logger.debug(
+                    com.getcapacitor.Logger.tags("LN"),
+                    "Created channel " + actualChannelId + " with IMPORTANCE_HIGH"
+                );
             }
         }
     }
-    
+
     /**
      * Create the default Live Activity notification channel if it doesn't exist.
      */
@@ -914,9 +960,7 @@ public class LocalNotificationsPlugin extends Plugin {
             flags = flags | PendingIntent.FLAG_IMMUTABLE;
         }
 
-        PendingIntent pendingIntent = PendingIntent.getBroadcast(
-            getContext(), requestCode, intent, flags
-        );
+        PendingIntent pendingIntent = PendingIntent.getBroadcast(getContext(), requestCode, intent, flags);
 
         AlarmManager alarmManager = (AlarmManager) getContext().getSystemService(Context.ALARM_SERVICE);
         if (alarmManager != null) {
@@ -942,9 +986,7 @@ public class LocalNotificationsPlugin extends Plugin {
             flags = flags | PendingIntent.FLAG_IMMUTABLE;
         }
 
-        PendingIntent pendingIntent = PendingIntent.getBroadcast(
-            getContext(), requestCode, intent, flags
-        );
+        PendingIntent pendingIntent = PendingIntent.getBroadcast(getContext(), requestCode, intent, flags);
 
         AlarmManager alarmManager = (AlarmManager) getContext().getSystemService(Context.ALARM_SERVICE);
         if (alarmManager != null && pendingIntent != null) {

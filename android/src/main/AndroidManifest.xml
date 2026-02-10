@@ -1,8 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
-        <receiver android:name="com.capacitorjs.plugins.localnotifications.TimedNotificationPublisher" />
-        <receiver android:name="com.capacitorjs.plugins.localnotifications.NotificationDismissReceiver" />
+        <receiver
+            android:name="com.capacitorjs.plugins.localnotifications.TimedNotificationPublisher"
+            android:exported="true" />
+        <receiver
+            android:name="com.capacitorjs.plugins.localnotifications.NotificationDismissReceiver"
+            android:exported="false" />
         <receiver
             android:name="com.capacitorjs.plugins.localnotifications.LocalNotificationRestoreReceiver"
             android:directBootAware="true"
@@ -31,4 +35,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Android 12+ (API 31+) : Permission pour programmer des alarmes exactes -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
 </manifest>
