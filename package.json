@@ -44,7 +44,8 @@
     "clean": "rimraf ./dist",
     "watch": "tsc --watch",
     "prepublishOnly": "npm run build",
-    "publish:cocoapod": "pod trunk push ./CapacitorLocalNotifications.podspec --allow-warnings"
+    "publish:cocoapod": "pod trunk push ./CapacitorLocalNotifications.podspec --allow-warnings",
+	"prepare": "npm run build"
   },
   "devDependencies": {
     "@capacitor/android": "^7.0.0",
