@@ -844,7 +844,11 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
                         self?.activityTimers[id]?.invalidate()
                         let timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(timeToLive), repeats: false) { [weak self] _ in
                             Task {
-                                await activity.end(nil, dismissalPolicy: .immediate)
+                                do {
+                                    try await activity.end(nil, dismissalPolicy: .immediate)
+                                } catch {
+                                    NSLog("[LN] ⚠️ timeToLive end failed (extension process likely dead): %@", error.localizedDescription)
+                                }
                                 self?.notifyListeners("liveActivityEnded", data: ["activityId": id])
                                 self?.activityTimers.removeValue(forKey: id)
                             }
@@ -914,37 +918,42 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
                         let existingStaleDate = activity.content.staleDate
 
                         // Update Live Activity with alert configuration for vibration (iOS 16.2+)
-                        if #available(iOS 16.2, *), shouldVibrate {
-                            let titleText = call.getString("title") ?? "Alerte"
-                            let bodyText = message ?? ""
-                            let alertConfig = AlertConfiguration(
-                                title: "\(titleText)",
-                                body: "\(bodyText)",
-                                sound: .default
-                            )
-                            await activity.update(
-                                ActivityContent(state: updatedState, staleDate: existingStaleDate),
-                                alertConfiguration: alertConfig
-                            )
-                            CAPLog.print("[LN] 📳 Live Activity updated with alert (vibration), staleDate preserved: \(String(describing: existingStaleDate))")
-                        } else {
-                            await activity.update(ActivityContent(state: updatedState, staleDate: existingStaleDate))
-                        }
-
-                        // Also trigger haptic feedback if app is in foreground
-                        if shouldVibrate {
-                            CAPLog.print("[LN] 📳 Triggering additional haptic feedback")
-                            NSLog("[LN] 📳 Triggering haptic feedback")
-                            await MainActor.run {
-                                let generator = UINotificationFeedbackGenerator()
-                                generator.prepare()
-                                generator.notificationOccurred(.error)
-                                AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+                        do {
+                            if #available(iOS 16.2, *), shouldVibrate {
+                                let titleText = call.getString("title") ?? "Alerte"
+                                let bodyText = message ?? ""
+                                let alertConfig = AlertConfiguration(
+                                    title: "\(titleText)",
+                                    body: "\(bodyText)",
+                                    sound: .default
+                                )
+                                try await activity.update(
+                                    ActivityContent(state: updatedState, staleDate: existingStaleDate),
+                                    alertConfiguration: alertConfig
+                                )
+                                CAPLog.print("[LN] 📳 Live Activity updated with alert (vibration), staleDate preserved: \(String(describing: existingStaleDate))")
+                            } else {
+                                try await activity.update(ActivityContent(state: updatedState, staleDate: existingStaleDate))
                             }
-                        }
 
-                        NSLog("[LN] ✅ Live Activity update completed successfully")
-                        call.resolve()
+                            // Also trigger haptic feedback if app is in foreground
+                            if shouldVibrate {
+                                CAPLog.print("[LN] 📳 Triggering additional haptic feedback")
+                                NSLog("[LN] 📳 Triggering haptic feedback")
+                                await MainActor.run {
+                                    let generator = UINotificationFeedbackGenerator()
+                                    generator.prepare()
+                                    generator.notificationOccurred(.error)
+                                    AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+                                }
+                            }
+
+                            NSLog("[LN] ✅ Live Activity update completed successfully")
+                            call.resolve()
+                        } catch {
+                            NSLog("[LN] ❌ Live Activity update failed (extension process likely dead): %@", error.localizedDescription)
+                            call.reject("Activity orphaned: \(error.localizedDescription)")
+                        }
                         return
                     }
                 }
@@ -974,7 +983,11 @@ public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
             Task {
                 for activity in Activity<GenericTimerAttributes>.activities {
                     if activity.attributes.id == id {
-                        await activity.end(nil, dismissalPolicy: .immediate)
+                        do {
+                            try await activity.end(nil, dismissalPolicy: .immediate)
+                        } catch {
+                            NSLog("[LN] ⚠️ endLiveActivity failed (extension process likely dead): %@", error.localizedDescription)
+                        }
                         call.resolve()
                         return
                     }
