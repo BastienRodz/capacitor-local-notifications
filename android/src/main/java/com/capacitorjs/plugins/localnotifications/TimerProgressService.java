@@ -36,7 +36,7 @@ public class TimerProgressService extends Service {
     // Intent action keys
     public static final String ACTION_START_TIMER = "com.capacitorjs.localnotifications.START_TIMER";
     public static final String ACTION_STOP_TIMER = "com.capacitorjs.localnotifications.STOP_TIMER";
-    
+
     // Intent extra keys
     public static final String EXTRA_ACTIVITY_ID = "activityId";
     public static final String EXTRA_NOTIFICATION_ID = "notificationId";
@@ -85,7 +85,7 @@ public class TimerProgressService extends Service {
         }
 
         String action = intent.getAction();
-        
+
         if (ACTION_STOP_TIMER.equals(action)) {
             Logger.debug(Logger.tags("LN"), TAG + ": Stopping timer");
             stopTimer();
@@ -105,8 +105,10 @@ public class TimerProgressService extends Service {
             maxDurationMs = intent.getLongExtra(EXTRA_MAX_DURATION_MS, 0);
             hasExceeded = false;
 
-            Logger.debug(Logger.tags("LN"), TAG + ": Starting timer for activity " + currentActivityId + 
-                ", maxDuration=" + maxDurationMs + "ms");
+            Logger.debug(
+                Logger.tags("LN"),
+                TAG + ": Starting timer for activity " + currentActivityId + ", maxDuration=" + maxDurationMs + "ms"
+            );
 
             // Save to SharedPreferences for persistence
             saveTimerConfig();
@@ -168,27 +170,28 @@ public class TimerProgressService extends Service {
 
     // Cached builder to avoid recreating actions on each update
     private NotificationCompat.Builder cachedBuilder = null;
-    
+
     private Notification createInitialNotification() {
         // Ensure the channel exists
         createNotificationChannel();
-        
+
         String channelId = currentChannelId != null ? currentChannelId : DEFAULT_CHANNEL_ID;
-        cachedBuilder = new NotificationCompat.Builder(this, channelId)
-            .setContentTitle(currentTitle)
-            .setContentText(currentMessage != null ? currentMessage : "")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .setOnlyAlertOnce(true) // Vibrate only on first show, silent on updates
-            .setUsesChronometer(true)
-            .setWhen(startTimestamp)
-            .setShowWhen(true)
-            // Vibrer au démarrage - pattern: pause, vibration, pause, vibration
-            .setVibrate(new long[]{0, 300, 200, 300})
-            .setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS);
-        
+        cachedBuilder =
+            new NotificationCompat.Builder(this, channelId)
+                .setContentTitle(currentTitle)
+                .setContentText(currentMessage != null ? currentMessage : "")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setOnlyAlertOnce(true) // Vibrate only on first show, silent on updates
+                .setUsesChronometer(true)
+                .setWhen(startTimestamp)
+                .setShowWhen(true)
+                // Vibrer au démarrage - pattern: pause, vibration, pause, vibration
+                .setVibrate(new long[] { 0, 300, 200, 300 })
+                .setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS);
+
         NotificationCompat.Builder builder = cachedBuilder;
 
         // Use BigTextStyle
@@ -210,7 +213,8 @@ public class TimerProgressService extends Service {
 
     private void saveTimerConfig() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        prefs.edit()
+        prefs
+            .edit()
             .putString("activityId", currentActivityId)
             .putInt("notificationId", currentNotificationId)
             .putString("title", currentTitle)
@@ -233,16 +237,17 @@ public class TimerProgressService extends Service {
             handler.removeCallbacks(updateRunnable);
         }
 
-        updateRunnable = new Runnable() {
-            @Override
-            public void run() {
-                updateProgress();
-                // Continue uniquement si pas arrêté (exceeded ou service stoppé)
-                if (updateRunnable != null) {
-                    handler.postDelayed(this, UPDATE_INTERVAL_MS);
+        updateRunnable =
+            new Runnable() {
+                @Override
+                public void run() {
+                    updateProgress();
+                    // Continue uniquement si pas arrêté (exceeded ou service stoppé)
+                    if (updateRunnable != null) {
+                        handler.postDelayed(this, UPDATE_INTERVAL_MS);
+                    }
                 }
-            }
-        };
+            };
 
         // Delay first check by 3 seconds to allow initial vibration to complete
         handler.postDelayed(updateRunnable, 3000);
@@ -336,7 +341,7 @@ public class TimerProgressService extends Service {
             .setShowWhen(true)
             .setProgress(100, 100, false)
             // NE PAS utiliser setOnlyAlertOnce pour permettre la vibration
-            .setVibrate(new long[]{0, 500, 250, 500, 250, 500})
+            .setVibrate(new long[] { 0, 500, 250, 500, 250, 500 })
             .setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS | NotificationCompat.DEFAULT_SOUND);
 
         // Use BigTextStyle with alert styling
@@ -389,14 +394,10 @@ public class TimerProgressService extends Service {
             }
 
             if (existingChannel == null) {
-                NotificationChannel channel = new NotificationChannel(
-                    channelId,
-                    "Alertes",
-                    NotificationManager.IMPORTANCE_HIGH
-                );
+                NotificationChannel channel = new NotificationChannel(channelId, "Alertes", NotificationManager.IMPORTANCE_HIGH);
                 channel.setDescription("Alertes importantes nécessitant votre attention");
                 channel.enableVibration(true);
-                channel.setVibrationPattern(new long[]{0, 500, 250, 500, 250, 500});
+                channel.setVibrationPattern(new long[] { 0, 500, 250, 500, 250, 500 });
                 notificationManager.createNotificationChannel(channel);
                 Logger.debug(Logger.tags("LN"), TAG + ": Created alert channel " + channelId);
             }
@@ -451,7 +452,7 @@ public class TimerProgressService extends Service {
         intent.putExtra(LocalNotificationManager.ACTION_INTENT_KEY, actionId);
         intent.putExtra("liveActivityId", currentActivityId);
         intent.putExtra(LocalNotificationManager.NOTIFICATION_IS_REMOVABLE_KEY, true);
-        
+
         // Build notification JSON for action handler
         JSONObject notificationObj = new JSONObject();
         try {
@@ -462,7 +463,7 @@ public class TimerProgressService extends Service {
             Logger.error(Logger.tags("LN"), "Error building notification JSON", e);
         }
         intent.putExtra(LocalNotificationManager.NOTIFICATION_OBJ_INTENT_KEY, notificationObj.toString());
-        
+
         return intent;
     }
 
@@ -480,9 +481,17 @@ public class TimerProgressService extends Service {
     /**
      * Static method to start the timer progress service.
      */
-    public static void startTimer(Context context, String activityId, int notificationId,
-                                   String title, String message, String channelId, String actionTypeId,
-                                   long startTimestamp, long maxDurationMs) {
+    public static void startTimer(
+        Context context,
+        String activityId,
+        int notificationId,
+        String title,
+        String message,
+        String channelId,
+        String actionTypeId,
+        long startTimestamp,
+        long maxDurationMs
+    ) {
         Intent intent = new Intent(context, TimerProgressService.class);
         intent.setAction(ACTION_START_TIMER);
         intent.putExtra(EXTRA_ACTIVITY_ID, activityId);

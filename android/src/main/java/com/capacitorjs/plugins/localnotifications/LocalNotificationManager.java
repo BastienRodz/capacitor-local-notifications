@@ -217,12 +217,12 @@ public class LocalNotificationManager {
         // Chronometer support for native timer display
         if (localNotification.hasChronometer()) {
             mBuilder.setUsesChronometer(true);
-            
+
             long when = localNotification.getChronometerWhen();
             if (when > 0) {
                 mBuilder.setWhen(when);
             }
-            
+
             // API 24+ for countdown mode
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && localNotification.isChronometerCountDown()) {
                 mBuilder.setChronometerCountDown(true);

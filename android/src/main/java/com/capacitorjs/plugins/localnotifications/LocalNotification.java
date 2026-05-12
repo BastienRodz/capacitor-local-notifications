@@ -41,7 +41,7 @@ public class LocalNotification {
     private LocalNotificationSchedule schedule;
     private String channelId;
     private String source;
-    
+
     // Chronometer support for native timer display
     private boolean chronometerEnabled;
     private boolean chronometerCountDown;
