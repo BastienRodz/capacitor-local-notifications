@@ -20,21 +20,21 @@ public class TimerEndReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         String activityId = intent.getStringExtra(ACTIVITY_ID_KEY);
-        
+
         if (activityId == null) {
             Logger.debug(Logger.tags("LN"), "TimerEndReceiver: No activity ID provided");
             return;
         }
-        
+
         Logger.debug(Logger.tags("LN"), "TimerEndReceiver: Timer ended for activity " + activityId);
-        
+
         // Notify the JavaScript layer that timer ended and auto-dismiss notification
         // Use the public method fireTimerEnded since notifyListeners is protected
         LocalNotificationsPlugin plugin = LocalNotificationsPlugin.getLocalNotificationsInstance();
         if (plugin != null) {
             // First, fire the event so JS can handle onComplete callback
             plugin.fireTimerEnded(activityId);
-            
+
             // Then auto-dismiss the notification (TTL system)
             plugin.dismissActivityAfterTimerEnd(activityId);
         } else {

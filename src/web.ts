@@ -255,16 +255,20 @@ export class LocalNotificationsWeb
   // LIVE ACTIVITIES (not supported on web)
   // ============================================
 
-  async startLiveActivity(options: LiveActivityOptions): Promise<LiveActivityResult> {
+  async startLiveActivity(
+    options: LiveActivityOptions,
+  ): Promise<LiveActivityResult> {
     // On web, fall back to a regular notification
-    console.warn('[LocalNotifications] Live Activities not supported on web, using regular notification');
-    
+    console.warn(
+      '[LocalNotifications] Live Activities not supported on web, using regular notification',
+    );
+
     const notification = new Notification(options.title, {
       body: options.message,
       tag: options.id,
     });
     this.deliveredNotifications.push(notification);
-    
+
     return {
       activityId: options.id,
     };
@@ -279,7 +283,9 @@ export class LocalNotificationsWeb
     const found = this.deliveredNotifications.find(n => n.tag === options.id);
     if (found) {
       found.close();
-      this.deliveredNotifications = this.deliveredNotifications.filter(n => n !== found);
+      this.deliveredNotifications = this.deliveredNotifications.filter(
+        n => n !== found,
+      );
     }
   }
 
